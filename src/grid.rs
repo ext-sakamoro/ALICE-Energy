@@ -80,7 +80,8 @@ impl PowerGrid {
     /// Average frequency deviation from nominal.
     pub fn frequency_deviation(&self) -> f64 {
         if self.nodes.is_empty() { return 0.0; }
-        let avg: f64 = self.nodes.iter().map(|n| n.frequency_hz).sum::<f64>() / self.nodes.len() as f64;
+        let rcp_n = 1.0 / self.nodes.len() as f64;
+        let avg: f64 = self.nodes.iter().map(|n| n.frequency_hz).sum::<f64>() * rcp_n;
         avg - self.nominal_frequency_hz
     }
 
