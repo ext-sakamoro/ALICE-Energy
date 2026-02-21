@@ -1,0 +1,21 @@
+[package]
+name = "alice-energy"
+version = "0.1.0"
+edition = "2021"
+authors = ["Moroya Sakamoto"]
+description = "ALICE-Energy — Deterministic power grid simulation, phase synchronization, battery degradation prediction"
+license = "AGPL-3.0-only"
+repository = "https://github.com/ext-sakamoro/ALICE-Energy"
+
+[dependencies]
+
+[lib]
+name = "alice_energy"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
