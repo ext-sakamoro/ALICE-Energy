@@ -22,8 +22,8 @@ pub struct SolarPanel {
 
 impl SolarPanel {
     /// Create a new solar panel.
-    #[must_use] 
-    pub fn new(rated_kw: f64, area_m2: f64, efficiency: f64) -> Self {
+    #[must_use]
+    pub const fn new(rated_kw: f64, area_m2: f64, efficiency: f64) -> Self {
         Self {
             rated_kw,
             area_m2,
@@ -52,8 +52,8 @@ pub struct WindTurbine {
 
 impl WindTurbine {
     /// Create a new wind turbine.
-    #[must_use] 
-    pub fn new(rated_kw: f64, swept_area_m2: f64) -> Self {
+    #[must_use]
+    pub const fn new(rated_kw: f64, swept_area_m2: f64) -> Self {
         Self {
             rated_kw,
             swept_area_m2,
@@ -108,7 +108,7 @@ pub enum WindRegion {
 ///
 /// `irradiance_w_m2`: Global horizontal irradiance (W/m²).
 /// `ambient_temp_c`: Ambient temperature (°C).
-#[must_use] 
+#[must_use]
 pub fn solar_output(panel: &SolarPanel, irradiance_w_m2: f64, ambient_temp_c: f64) -> SolarOutput {
     if irradiance_w_m2 <= 0.0 || panel.rated_kw <= 0.0 {
         let mut buf = [0u8; 16];
@@ -124,8 +124,8 @@ pub fn solar_output(panel: &SolarPanel, irradiance_w_m2: f64, ambient_temp_c: f6
 
     // Temperature derating: 1 + coeff * (T_cell - 25)
     // Approximate cell temp: T_cell ≈ T_ambient + 0.03 * irradiance
-    let t_cell = ambient_temp_c + 0.03 * irradiance_w_m2;
-    let temp_derating = (1.0 + panel.temp_coeff * (t_cell - 25.0)).max(0.0);
+    let t_cell = 0.03f64.mul_add(irradiance_w_m2, ambient_temp_c);
+    let temp_derating = panel.temp_coeff.mul_add(t_cell - 25.0, 1.0).max(0.0);
 
     // Power: Area * Irradiance * Efficiency * Derating
     // Convert W to kW: * 0.001
@@ -152,7 +152,7 @@ pub fn solar_output(panel: &SolarPanel, irradiance_w_m2: f64, ambient_temp_c: f6
 ///
 /// `wind_speed_ms`: Wind speed at hub height (m/s).
 /// `air_density_kg_m3`: Air density (kg/m³). Default ~1.225 at sea level.
-#[must_use] 
+#[must_use]
 pub fn wind_output(
     turbine: &WindTurbine,
     wind_speed_ms: f64,
@@ -199,7 +199,7 @@ pub fn wind_output(
 /// Compute capacity factor from a time series of outputs.
 ///
 /// Returns average output / rated capacity.
-#[must_use] 
+#[must_use]
 pub fn capacity_factor(outputs_kw: &[f64], rated_kw: f64) -> f64 {
     if outputs_kw.is_empty() || rated_kw <= 0.0 {
         return 0.0;
@@ -212,6 +212,7 @@ pub fn capacity_factor(outputs_kw: &[f64], rated_kw: f64) -> f64 {
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -304,7 +305,7 @@ mod tests {
         let out2 = wind_output(&turbine, 8.0, 1.225);
         if out1.power_kw > 0.0 && out2.power_kw < turbine.rated_kw {
             let ratio = out2.power_kw / out1.power_kw;
-            assert!((ratio - 8.0).abs() < 0.5, "ratio = {}", ratio);
+            assert!((ratio - 8.0).abs() < 0.5, "ratio = {ratio}");
         }
     }
 

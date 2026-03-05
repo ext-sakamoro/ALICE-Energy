@@ -25,7 +25,7 @@ pub struct FrequencyEvent {
 }
 
 /// Compute phase corrections to align all nodes with grid average.
-#[must_use] 
+#[must_use]
 pub fn compute_phase_corrections(grid: &PowerGrid) -> Vec<PhaseCorrection> {
     let n = grid.nodes.len();
     if n == 0 {
@@ -108,13 +108,13 @@ pub fn max_phase_deviation(grid: &PowerGrid) -> f64 {
 }
 
 /// Check if all nodes are synchronized within tolerance.
-#[must_use] 
+#[must_use]
 pub fn is_synchronized(grid: &PowerGrid, tolerance_rad: f64) -> bool {
     max_phase_deviation(grid) <= tolerance_rad
 }
 
 /// Detect frequency anomaly if average deviation exceeds 0.1 Hz.
-#[must_use] 
+#[must_use]
 pub fn detect_frequency_event(grid: &PowerGrid, timestamp_ns: u64) -> Option<FrequencyEvent> {
     let n = grid.nodes.len();
     if n == 0 {
@@ -140,6 +140,7 @@ pub fn detect_frequency_event(grid: &PowerGrid, timestamp_ns: u64) -> Option<Fre
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
     use crate::node::{NodeKind, PowerNode};

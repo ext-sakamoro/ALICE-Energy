@@ -90,8 +90,8 @@ pub struct DcLoadFlow {
 
 impl DcLoadFlow {
     /// Create a new DC load flow problem.
-    #[must_use] 
-    pub fn new(config: DcLoadFlowConfig) -> Self {
+    #[must_use]
+    pub const fn new(config: DcLoadFlowConfig) -> Self {
         Self {
             buses: Vec::new(),
             branches: Vec::new(),
@@ -120,8 +120,8 @@ impl DcLoadFlow {
     }
 
     /// Number of buses.
-    #[must_use] 
-    pub fn bus_count(&self) -> usize {
+    #[must_use]
+    pub const fn bus_count(&self) -> usize {
         self.buses.len()
     }
 
@@ -130,7 +130,7 @@ impl DcLoadFlow {
     /// DC approximation: `P_i` = `sum_j` `B_ij` * (`θ_i` - `θ_j`)
     /// Rearranged: `θ_i` = (`P_i` + sum_{j≠i} `B_ij` * `θ_j`) / `B_ii`
     /// where `B_ii` = `sum_j` `B_ij` (diagonal of susceptance matrix).
-    #[must_use] 
+    #[must_use]
     pub fn solve(&self) -> DcLoadFlowResult {
         let n = self.buses.len();
         if n == 0 {
@@ -184,7 +184,10 @@ impl DcLoadFlow {
                 let theta_new = (self.buses[i].power_mw + sum_b_theta) * rcp_bii;
 
                 // Apply relaxation
-                let theta_relaxed = angles[i] + self.config.relaxation * (theta_new - angles[i]);
+                let theta_relaxed = self
+                    .config
+                    .relaxation
+                    .mul_add(theta_new - angles[i], angles[i]);
 
                 let change = (theta_relaxed - angles[i]).abs();
                 if change > max_change {
@@ -307,8 +310,8 @@ pub struct AcLoadFlow {
 }
 
 impl AcLoadFlow {
-    #[must_use] 
-    pub fn new(config: AcLoadFlowConfig) -> Self {
+    #[must_use]
+    pub const fn new(config: AcLoadFlowConfig) -> Self {
         Self {
             buses: Vec::new(),
             branches: Vec::new(),
@@ -332,8 +335,8 @@ impl AcLoadFlow {
         self.branches.push(AcBranch { from, to, g, b });
     }
 
-    #[must_use] 
-    pub fn bus_count(&self) -> usize {
+    #[must_use]
+    pub const fn bus_count(&self) -> usize {
         self.buses.len()
     }
 
@@ -408,8 +411,8 @@ impl AcLoadFlow {
                         let angle_diff = theta[i] - theta[j];
                         let cos_d = angle_diff.cos();
                         let sin_d = angle_diff.sin();
-                        p += v[i] * v[j] * (g_mat[i][j] * cos_d + b_mat[i][j] * sin_d);
-                        q += v[i] * v[j] * (g_mat[i][j] * sin_d - b_mat[i][j] * cos_d);
+                        p += v[i] * v[j] * g_mat[i][j].mul_add(cos_d, b_mat[i][j] * sin_d);
+                        q += v[i] * v[j] * g_mat[i][j].mul_add(sin_d, -(b_mat[i][j] * cos_d));
                     }
                     (p, q)
                 })
@@ -444,10 +447,11 @@ impl AcLoadFlow {
             for (ki, &i) in non_slack.iter().enumerate() {
                 for (kj, &j) in non_slack.iter().enumerate() {
                     if i == j {
-                        jac[ki][kj] = -q_calc[i] - b_mat[i][i] * v[i] * v[i];
+                        jac[ki][kj] = (b_mat[i][i] * v[i]).mul_add(-v[i], -q_calc[i]);
                     } else {
                         let a = theta[i] - theta[j];
-                        jac[ki][kj] = v[i] * v[j] * (g_mat[i][j] * a.sin() - b_mat[i][j] * a.cos());
+                        jac[ki][kj] =
+                            v[i] * v[j] * g_mat[i][j].mul_add(a.sin(), -(b_mat[i][j] * a.cos()));
                     }
                 }
             }
@@ -456,10 +460,11 @@ impl AcLoadFlow {
             for (ki, &i) in non_slack.iter().enumerate() {
                 for (kj, &j) in pq_indices.iter().enumerate() {
                     if i == j {
-                        jac[ki][n_p + kj] = p_calc[i] / v[i].max(1e-10) + g_mat[i][i] * v[i];
+                        jac[ki][n_p + kj] = g_mat[i][i].mul_add(v[i], p_calc[i] / v[i].max(1e-10));
                     } else {
                         let a = theta[i] - theta[j];
-                        jac[ki][n_p + kj] = v[i] * (g_mat[i][j] * a.cos() + b_mat[i][j] * a.sin());
+                        jac[ki][n_p + kj] =
+                            v[i] * g_mat[i][j].mul_add(a.cos(), b_mat[i][j] * a.sin());
                     }
                 }
             }
@@ -468,11 +473,11 @@ impl AcLoadFlow {
             for (ki, &i) in pq_indices.iter().enumerate() {
                 for (kj, &j) in non_slack.iter().enumerate() {
                     if i == j {
-                        jac[n_p + ki][kj] = p_calc[i] - g_mat[i][i] * v[i] * v[i];
+                        jac[n_p + ki][kj] = (g_mat[i][i] * v[i]).mul_add(-v[i], p_calc[i]);
                     } else {
                         let a = theta[i] - theta[j];
                         jac[n_p + ki][kj] =
-                            -v[i] * v[j] * (g_mat[i][j] * a.cos() + b_mat[i][j] * a.sin());
+                            -v[i] * v[j] * g_mat[i][j].mul_add(a.cos(), b_mat[i][j] * a.sin());
                     }
                 }
             }
@@ -481,11 +486,12 @@ impl AcLoadFlow {
             for (ki, &i) in pq_indices.iter().enumerate() {
                 for (kj, &j) in pq_indices.iter().enumerate() {
                     if i == j {
-                        jac[n_p + ki][n_p + kj] = q_calc[i] / v[i].max(1e-10) - b_mat[i][i] * v[i];
+                        jac[n_p + ki][n_p + kj] =
+                            b_mat[i][i].mul_add(-v[i], q_calc[i] / v[i].max(1e-10));
                     } else {
                         let a = theta[i] - theta[j];
                         jac[n_p + ki][n_p + kj] =
-                            v[i] * (g_mat[i][j] * a.sin() - b_mat[i][j] * a.cos());
+                            v[i] * g_mat[i][j].mul_add(a.sin(), -(b_mat[i][j] * a.cos()));
                     }
                 }
             }
@@ -673,11 +679,10 @@ mod tests {
         // For load buses, verify P_i ≈ sum of B_ij*(θ_i - θ_j)
         let angles = &result.angles_rad;
         // Bus 1: P = -20 ≈ 10*(θ1-θ0) + 5*(θ1-θ2)
-        let p1_calc = 10.0 * (angles[1] - angles[0]) + 5.0 * (angles[1] - angles[2]);
+        let p1_calc = 10.0f64.mul_add(angles[1] - angles[0], 5.0 * (angles[1] - angles[2]));
         assert!(
             (p1_calc - (-20.0)).abs() < 1e-6,
-            "Bus 1 mismatch: {}",
-            p1_calc
+            "Bus 1 mismatch: {p1_calc}"
         );
     }
 

@@ -33,8 +33,15 @@ pub struct Generator {
 
 impl Generator {
     /// Create a new generator.
-    #[must_use] 
-    pub fn new(id: u64, cost_a: f64, cost_b: f64, cost_c: f64, p_min: f64, p_max: f64) -> Self {
+    #[must_use]
+    pub const fn new(
+        id: u64,
+        cost_a: f64,
+        cost_b: f64,
+        cost_c: f64,
+        p_min: f64,
+        p_max: f64,
+    ) -> Self {
         Self {
             id,
             cost_a,
@@ -47,22 +54,22 @@ impl Generator {
 
     /// Cost at given power output.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn cost(&self, p: f64) -> f64 {
-        self.cost_a + self.cost_b * p + self.cost_c * p * p
+        (self.cost_c * p).mul_add(p, self.cost_b.mul_add(p, self.cost_a))
     }
 
     /// Incremental cost (dC/dP) at given power output.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn incremental_cost(&self, p: f64) -> f64 {
-        self.cost_b + 2.0 * self.cost_c * p
+        (2.0 * self.cost_c).mul_add(p, self.cost_b)
     }
 
     /// Optimal output for a given lambda (system incremental cost).
     /// P = (λ - b) / (2c), clamped to [`p_min`, `p_max`].
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn optimal_output(&self, lambda: f64) -> f64 {
         if self.cost_c <= 0.0 {
             // Linear cost: run at max if lambda >= b, else min
@@ -250,6 +257,7 @@ fn make_result(
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -287,9 +295,7 @@ mod tests {
         let total: f64 = result.outputs_mw.iter().sum();
         assert!(
             (total - demand).abs() < 0.1,
-            "Total {} != demand {}",
-            total,
-            demand
+            "Total {total} != demand {demand}"
         );
     }
 
@@ -311,7 +317,7 @@ mod tests {
             || (result.outputs_mw[1] - gens[1].p_max).abs() < 0.1;
 
         if !p1_at_limit && !p2_at_limit {
-            assert!((ic1 - ic2).abs() < 0.1, "IC1={}, IC2={}", ic1, ic2);
+            assert!((ic1 - ic2).abs() < 0.1, "IC1={ic1}, IC2={ic2}");
         }
     }
 

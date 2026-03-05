@@ -33,7 +33,7 @@ pub struct PowerGrid {
 }
 
 impl PowerGrid {
-    #[must_use] 
+    #[must_use]
     pub fn new(id: u64, nominal_freq: f64) -> Self {
         Self {
             id: GridId(id),
@@ -74,7 +74,7 @@ impl PowerGrid {
     }
 
     /// Total generation (sum of Generator outputs).
-    #[must_use] 
+    #[must_use]
     pub fn total_generation(&self) -> f64 {
         self.nodes
             .iter()
@@ -84,7 +84,7 @@ impl PowerGrid {
     }
 
     /// Total consumption (sum of Consumer outputs).
-    #[must_use] 
+    #[must_use]
     pub fn total_consumption(&self) -> f64 {
         self.nodes
             .iter()
@@ -95,13 +95,13 @@ impl PowerGrid {
 
     /// Supply minus demand (positive = surplus).
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn supply_demand_balance(&self) -> f64 {
         self.total_generation() - self.total_consumption()
     }
 
     /// Average frequency deviation from nominal.
-    #[must_use] 
+    #[must_use]
     pub fn frequency_deviation(&self) -> f64 {
         if self.nodes.is_empty() {
             return 0.0;
@@ -111,12 +111,12 @@ impl PowerGrid {
         avg - self.nominal_frequency_hz
     }
 
-    #[must_use] 
-    pub fn node_count(&self) -> usize {
+    #[must_use]
+    pub const fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn find_node(&self, id: u64) -> Option<&PowerNode> {
         self.nodes.iter().find(|n| n.id == NodeId(id))
     }
@@ -126,19 +126,20 @@ impl PowerGrid {
     }
 
     /// O(1) node lookup via `HashMap`.
-    #[must_use] 
+    #[must_use]
     pub fn find_node_fast(&self, id: u64) -> Option<&PowerNode> {
         self.node_index.get(&id).map(|&idx| &self.nodes[idx])
     }
 
     /// Get neighbor node IDs for a given node.
-    #[must_use] 
+    #[must_use]
     pub fn neighbors(&self, id: u64) -> &[u64] {
         self.adjacency.get(&id).map_or(&[], std::vec::Vec::as_slice)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
     use crate::node::NodeKind;
@@ -256,7 +257,7 @@ mod tests {
         for id in [10, 20, 30, 99] {
             let slow = grid.find_node(id).map(|n| n.id);
             let fast = grid.find_node_fast(id).map(|n| n.id);
-            assert_eq!(slow, fast, "Mismatch for node id {}", id);
+            assert_eq!(slow, fast, "Mismatch for node id {id}");
         }
     }
 

@@ -31,7 +31,7 @@ pub struct BatteryState {
 }
 
 impl BatteryState {
-    #[must_use] 
+    #[must_use]
     pub fn new(id: u64, chemistry: BatteryChemistry, capacity_kwh: f64, max_cycles: u32) -> Self {
         Self {
             id: BatteryId(id),
@@ -53,18 +53,18 @@ impl BatteryState {
     /// Health as percentage (0–100).
     /// Uses pre-computed `rcp_max_cycles` — no division in the hot path.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn health_percentage(&self) -> f64 {
         if self.max_cycles == 0 {
             return 0.0;
         }
         // Replaces `/ self.max_cycles as f64` with a multiply by the reciprocal.
-        (100.0 * (1.0 - self.cycle_count as f64 * self.rcp_max_cycles)).clamp(0.0, 100.0)
+        (100.0 * (self.cycle_count as f64).mul_add(-self.rcp_max_cycles, 1.0)).clamp(0.0, 100.0)
     }
 
     /// Remaining usable capacity in kWh.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn remaining_capacity_kwh(&self) -> f64 {
         // Pre-compute health once; reuse the reciprocal of 100.0 (= 0.01) as a constant
         // so the compiler can fold it rather than emit a runtime division.
@@ -82,7 +82,7 @@ impl BatteryState {
         }
         // Pre-compute reciprocal once instead of dividing twice (charge + discharge share this pattern).
         let rcp_eff = 1.0 / effective_capacity;
-        self.state_of_charge = (self.state_of_charge + kwh * rcp_eff).min(1.0);
+        self.state_of_charge = kwh.mul_add(rcp_eff, self.state_of_charge).min(1.0);
     }
 
     /// Discharge by `kwh`, returns actual kWh discharged.
@@ -101,24 +101,24 @@ impl BatteryState {
     }
 
     /// Record a complete charge/discharge cycle.
-    pub fn complete_cycle(&mut self) {
+    pub const fn complete_cycle(&mut self) {
         self.cycle_count += 1;
     }
 }
 
 /// Predict health percentage after additional cycles.
-#[must_use] 
+#[must_use]
 pub fn predict_degradation(battery: &BatteryState, additional_cycles: u32) -> f64 {
     if battery.max_cycles == 0 {
         return 0.0;
     }
     let total = battery.cycle_count + additional_cycles;
     // Use the pre-computed reciprocal from the battery state.
-    (100.0 * (1.0 - total as f64 * battery.rcp_max_cycles)).clamp(0.0, 100.0)
+    (100.0 * (total as f64).mul_add(-battery.rcp_max_cycles, 1.0)).clamp(0.0, 100.0)
 }
 
 /// Days until health drops below threshold.
-#[must_use] 
+#[must_use]
 pub fn time_to_replacement(
     battery: &BatteryState,
     cycles_per_day: f64,
@@ -139,8 +139,10 @@ pub fn time_to_replacement(
     // Replace `/ 100.0` with `* 0.01` and `/ cycles_per_day` with a
     // pre-computed reciprocal so the single division is paid only once.
     let rcp_cpd = 1.0 / cycles_per_day;
-    let cycles_remaining =
-        battery.max_cycles as f64 * (1.0 - min_health_pct * 0.01) - battery.cycle_count as f64;
+    let cycles_remaining = (battery.max_cycles as f64).mul_add(
+        min_health_pct.mul_add(-0.01, 1.0),
+        -(battery.cycle_count as f64),
+    );
     if cycles_remaining <= 0.0 {
         return 0.0;
     }
@@ -148,6 +150,7 @@ pub fn time_to_replacement(
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -215,7 +218,7 @@ mod tests {
         }
     }
 
-    /// Confirm rcp_max_cycles is consistent with max_cycles after construction.
+    /// Confirm `rcp_max_cycles` is consistent with `max_cycles` after construction.
     #[test]
     fn rcp_max_cycles_consistent() {
         let b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 500);
@@ -223,7 +226,7 @@ mod tests {
         assert!((b.rcp_max_cycles - expected_rcp).abs() < 1e-15);
     }
 
-    /// Zero max_cycles must not panic.
+    /// Zero `max_cycles` must not panic.
     #[test]
     fn zero_max_cycles_safe() {
         let b = BatteryState::new(1, BatteryChemistry::SodiumIon, 100.0, 0);

@@ -32,8 +32,8 @@ pub struct PowerNode {
 }
 
 impl PowerNode {
-    #[must_use] 
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         id: u64,
         kind: NodeKind,
         capacity_mw: f64,
@@ -53,7 +53,7 @@ impl PowerNode {
 
     /// Utilization ratio (0.0 to 1.0).
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn utilization(&self) -> f64 {
         if self.capacity_mw <= 0.0 {
             return 0.0;
@@ -63,19 +63,20 @@ impl PowerNode {
 
     /// Set output, clamped to [0, capacity].
     #[inline]
-    pub fn set_output(&mut self, mw: f64) {
+    pub const fn set_output(&mut self, mw: f64) {
         self.current_output_mw = mw.clamp(0.0, self.capacity_mw);
     }
 
     /// Whether current output exceeds capacity.
     #[inline]
-    #[must_use] 
+    #[must_use]
     pub fn is_overloaded(&self) -> bool {
         self.current_output_mw > self.capacity_mw
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
