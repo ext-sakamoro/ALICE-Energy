@@ -31,6 +31,7 @@ pub struct BatteryState {
 }
 
 impl BatteryState {
+    #[must_use] 
     pub fn new(id: u64, chemistry: BatteryChemistry, capacity_kwh: f64, max_cycles: u32) -> Self {
         Self {
             id: BatteryId(id),
@@ -41,21 +42,29 @@ impl BatteryState {
             temperature_c: 25.0,
             internal_resistance_ohm: 0.01,
             max_cycles,
-            rcp_max_cycles: if max_cycles == 0 { 0.0 } else { 1.0 / max_cycles as f64 },
+            rcp_max_cycles: if max_cycles == 0 {
+                0.0
+            } else {
+                1.0 / max_cycles as f64
+            },
         }
     }
 
     /// Health as percentage (0–100).
     /// Uses pre-computed `rcp_max_cycles` — no division in the hot path.
     #[inline]
+    #[must_use] 
     pub fn health_percentage(&self) -> f64 {
-        if self.max_cycles == 0 { return 0.0; }
+        if self.max_cycles == 0 {
+            return 0.0;
+        }
         // Replaces `/ self.max_cycles as f64` with a multiply by the reciprocal.
         (100.0 * (1.0 - self.cycle_count as f64 * self.rcp_max_cycles)).clamp(0.0, 100.0)
     }
 
     /// Remaining usable capacity in kWh.
     #[inline]
+    #[must_use] 
     pub fn remaining_capacity_kwh(&self) -> f64 {
         // Pre-compute health once; reuse the reciprocal of 100.0 (= 0.01) as a constant
         // so the compiler can fold it rather than emit a runtime division.
@@ -63,12 +72,14 @@ impl BatteryState {
         self.capacity_kwh * (self.health_percentage() * RCP_100) * self.state_of_charge
     }
 
-    /// Charge the battery by `kwh`, clamping SoC to 1.0.
+    /// Charge the battery by `kwh`, clamping `SoC` to 1.0.
     pub fn charge(&mut self, kwh: f64) {
         let health = self.health_percentage();
         // `/ 100.0` replaced by `* 0.01` — constant folded, no runtime division.
         let effective_capacity = self.capacity_kwh * (health * 0.01);
-        if effective_capacity <= 0.0 { return; }
+        if effective_capacity <= 0.0 {
+            return;
+        }
         // Pre-compute reciprocal once instead of dividing twice (charge + discharge share this pattern).
         let rcp_eff = 1.0 / effective_capacity;
         self.state_of_charge = (self.state_of_charge + kwh * rcp_eff).min(1.0);
@@ -78,7 +89,9 @@ impl BatteryState {
     pub fn discharge(&mut self, kwh: f64) -> f64 {
         let health = self.health_percentage();
         let effective_capacity = self.capacity_kwh * (health * 0.01);
-        if effective_capacity <= 0.0 { return 0.0; }
+        if effective_capacity <= 0.0 {
+            return 0.0;
+        }
         let available = self.state_of_charge * effective_capacity;
         let actual = kwh.min(available);
         // Pre-compute reciprocal once; used in the SoC update below.
@@ -94,18 +107,30 @@ impl BatteryState {
 }
 
 /// Predict health percentage after additional cycles.
+#[must_use] 
 pub fn predict_degradation(battery: &BatteryState, additional_cycles: u32) -> f64 {
-    if battery.max_cycles == 0 { return 0.0; }
+    if battery.max_cycles == 0 {
+        return 0.0;
+    }
     let total = battery.cycle_count + additional_cycles;
     // Use the pre-computed reciprocal from the battery state.
     (100.0 * (1.0 - total as f64 * battery.rcp_max_cycles)).clamp(0.0, 100.0)
 }
 
 /// Days until health drops below threshold.
-pub fn time_to_replacement(battery: &BatteryState, cycles_per_day: f64, min_health_pct: f64) -> f64 {
-    if cycles_per_day <= 0.0 || battery.max_cycles == 0 { return f64::INFINITY; }
+#[must_use] 
+pub fn time_to_replacement(
+    battery: &BatteryState,
+    cycles_per_day: f64,
+    min_health_pct: f64,
+) -> f64 {
+    if cycles_per_day <= 0.0 || battery.max_cycles == 0 {
+        return f64::INFINITY;
+    }
     let current_health = battery.health_percentage();
-    if current_health <= min_health_pct { return 0.0; }
+    if current_health <= min_health_pct {
+        return 0.0;
+    }
 
     // health = 100 * (1 - (cycle_count + cpd*days) / max_cycles)
     // min_health = 100 * (1 - (cycle_count + cpd*days) / max_cycles)
@@ -116,7 +141,9 @@ pub fn time_to_replacement(battery: &BatteryState, cycles_per_day: f64, min_heal
     let rcp_cpd = 1.0 / cycles_per_day;
     let cycles_remaining =
         battery.max_cycles as f64 * (1.0 - min_health_pct * 0.01) - battery.cycle_count as f64;
-    if cycles_remaining <= 0.0 { return 0.0; }
+    if cycles_remaining <= 0.0 {
+        return 0.0;
+    }
     cycles_remaining * rcp_cpd
 }
 
@@ -133,7 +160,9 @@ mod tests {
     #[test]
     fn health_after_cycles() {
         let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 1000);
-        for _ in 0..500 { b.complete_cycle(); }
+        for _ in 0..500 {
+            b.complete_cycle();
+        }
         assert!((b.health_percentage() - 50.0).abs() < 1e-10);
     }
 
@@ -201,5 +230,86 @@ mod tests {
         assert_eq!(b.health_percentage(), 0.0);
         assert_eq!(predict_degradation(&b, 100), 0.0);
         assert_eq!(time_to_replacement(&b, 1.0, 20.0), f64::INFINITY);
+    }
+
+    #[test]
+    fn health_clamps_at_zero_after_exceeding_max_cycles() {
+        let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 10);
+        for _ in 0..20 {
+            b.complete_cycle();
+        }
+        assert_eq!(b.health_percentage(), 0.0);
+    }
+
+    #[test]
+    fn remaining_capacity_full_charge_new_battery() {
+        let b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 1000);
+        assert!((b.remaining_capacity_kwh() - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn remaining_capacity_half_soc() {
+        let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 1000);
+        b.state_of_charge = 0.5;
+        assert!((b.remaining_capacity_kwh() - 50.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn charge_does_not_exceed_soc_one() {
+        let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 1000);
+        b.state_of_charge = 0.95;
+        b.charge(1000.0);
+        assert!(b.state_of_charge <= 1.0 + 1e-15);
+    }
+
+    #[test]
+    fn discharge_does_not_go_below_zero_soc() {
+        let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 1000);
+        b.state_of_charge = 0.01;
+        b.discharge(1000.0);
+        assert!(b.state_of_charge >= -1e-15);
+    }
+
+    #[test]
+    fn charge_on_fully_degraded_battery_is_noop() {
+        let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 10);
+        for _ in 0..10 {
+            b.complete_cycle();
+        }
+        let soc_before = b.state_of_charge;
+        b.charge(50.0);
+        assert!((b.state_of_charge - soc_before).abs() < 1e-15);
+    }
+
+    #[test]
+    fn discharge_on_fully_degraded_returns_zero() {
+        let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 10);
+        for _ in 0..10 {
+            b.complete_cycle();
+        }
+        let actual = b.discharge(50.0);
+        assert_eq!(actual, 0.0);
+    }
+
+    #[test]
+    fn time_to_replacement_zero_cycles_per_day() {
+        let b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 1000);
+        assert_eq!(time_to_replacement(&b, 0.0, 20.0), f64::INFINITY);
+    }
+
+    #[test]
+    fn time_to_replacement_already_below_threshold() {
+        let mut b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 1000);
+        for _ in 0..900 {
+            b.complete_cycle();
+        }
+        // Health is 10%, threshold is 20%
+        assert_eq!(time_to_replacement(&b, 1.0, 20.0), 0.0);
+    }
+
+    #[test]
+    fn predict_degradation_beyond_max_cycles_clamps_to_zero() {
+        let b = BatteryState::new(1, BatteryChemistry::LithiumIon, 100.0, 100);
+        assert_eq!(predict_degradation(&b, 200), 0.0);
     }
 }

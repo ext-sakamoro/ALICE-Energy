@@ -7,6 +7,7 @@
 //! Author: Moroya Sakamoto
 
 use crate::fnv1a;
+use rayon::prelude::*;
 
 /// Bus type classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +90,7 @@ pub struct DcLoadFlow {
 
 impl DcLoadFlow {
     /// Create a new DC load flow problem.
+    #[must_use] 
     pub fn new(config: DcLoadFlowConfig) -> Self {
         Self {
             buses: Vec::new(),
@@ -118,15 +120,17 @@ impl DcLoadFlow {
     }
 
     /// Number of buses.
+    #[must_use] 
     pub fn bus_count(&self) -> usize {
         self.buses.len()
     }
 
     /// Solve the DC load flow using Gauss-Seidel iteration.
     ///
-    /// DC approximation: P_i = sum_j B_ij * (θ_i - θ_j)
-    /// Rearranged: θ_i = (P_i + sum_{j≠i} B_ij * θ_j) / B_ii
-    /// where B_ii = sum_j B_ij (diagonal of susceptance matrix).
+    /// DC approximation: `P_i` = `sum_j` `B_ij` * (`θ_i` - `θ_j`)
+    /// Rearranged: `θ_i` = (`P_i` + sum_{j≠i} `B_ij` * `θ_j`) / `B_ii`
+    /// where `B_ii` = `sum_j` `B_ij` (diagonal of susceptance matrix).
+    #[must_use] 
     pub fn solve(&self) -> DcLoadFlowResult {
         let n = self.buses.len();
         if n == 0 {
@@ -201,7 +205,7 @@ impl DcLoadFlow {
         // Compute branch flows: P_ij = B_ij * (θ_i - θ_j)
         let branch_flows: Vec<f64> = self
             .branches
-            .iter()
+            .par_iter()
             .map(|br| br.susceptance * (angles[br.from] - angles[br.to]))
             .collect();
 
@@ -244,7 +248,7 @@ pub struct AcBus {
     pub bus_type: AcBusType,
     /// Net active power injection (MW). Positive = generation.
     pub p_mw: f64,
-    /// Net reactive power injection (MVAr). Positive = generation.
+    /// Net reactive power injection (`MVAr`). Positive = generation.
     pub q_mvar: f64,
     /// Voltage magnitude (per unit).
     pub v_pu: f64,
@@ -303,6 +307,7 @@ pub struct AcLoadFlow {
 }
 
 impl AcLoadFlow {
+    #[must_use] 
     pub fn new(config: AcLoadFlowConfig) -> Self {
         Self {
             buses: Vec::new(),
@@ -327,6 +332,7 @@ impl AcLoadFlow {
         self.branches.push(AcBranch { from, to, g, b });
     }
 
+    #[must_use] 
     pub fn bus_count(&self) -> usize {
         self.buses.len()
     }
@@ -334,7 +340,7 @@ impl AcLoadFlow {
     /// Solve AC power flow using Newton-Raphson iteration.
     ///
     /// At each iteration:
-    /// 1. Compute power injections P_calc, Q_calc from Y-bus
+    /// 1. Compute power injections `P_calc`, `Q_calc` from Y-bus
     /// 2. Form mismatch vector ΔP, ΔQ
     /// 3. Build Jacobian (J1=dP/dθ, J2=dP/dV, J3=dQ/dθ, J4=dQ/dV)
     /// 4. Solve J * [Δθ; ΔV/V] = [ΔP; ΔQ] via Gaussian elimination
@@ -392,18 +398,22 @@ impl AcLoadFlow {
         let mut converged = false;
 
         for iter in 0..self.config.max_iterations {
-            // Compute P_calc, Q_calc
-            let mut p_calc = vec![0.0f64; n];
-            let mut q_calc = vec![0.0f64; n];
-            for i in 0..n {
-                for j in 0..n {
-                    let angle_diff = theta[i] - theta[j];
-                    let cos_d = angle_diff.cos();
-                    let sin_d = angle_diff.sin();
-                    p_calc[i] += v[i] * v[j] * (g_mat[i][j] * cos_d + b_mat[i][j] * sin_d);
-                    q_calc[i] += v[i] * v[j] * (g_mat[i][j] * sin_d - b_mat[i][j] * cos_d);
-                }
-            }
+            // Compute P_calc, Q_calc — each bus is independent, parallelise over buses.
+            let (p_calc, q_calc): (Vec<f64>, Vec<f64>) = (0..n)
+                .into_par_iter()
+                .map(|i| {
+                    let mut p = 0.0f64;
+                    let mut q = 0.0f64;
+                    for j in 0..n {
+                        let angle_diff = theta[i] - theta[j];
+                        let cos_d = angle_diff.cos();
+                        let sin_d = angle_diff.sin();
+                        p += v[i] * v[j] * (g_mat[i][j] * cos_d + b_mat[i][j] * sin_d);
+                        q += v[i] * v[j] * (g_mat[i][j] * sin_d - b_mat[i][j] * cos_d);
+                    }
+                    (p, q)
+                })
+                .unzip();
 
             // Mismatch vector
             let mut mismatch = vec![0.0f64; dim];

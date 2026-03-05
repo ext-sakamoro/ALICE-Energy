@@ -32,7 +32,14 @@ pub struct PowerNode {
 }
 
 impl PowerNode {
-    pub fn new(id: u64, kind: NodeKind, capacity_mw: f64, nominal_freq: f64, voltage_kv: f64) -> Self {
+    #[must_use] 
+    pub fn new(
+        id: u64,
+        kind: NodeKind,
+        capacity_mw: f64,
+        nominal_freq: f64,
+        voltage_kv: f64,
+    ) -> Self {
         Self {
             id: NodeId(id),
             kind,
@@ -46,8 +53,11 @@ impl PowerNode {
 
     /// Utilization ratio (0.0 to 1.0).
     #[inline]
+    #[must_use] 
     pub fn utilization(&self) -> f64 {
-        if self.capacity_mw <= 0.0 { return 0.0; }
+        if self.capacity_mw <= 0.0 {
+            return 0.0;
+        }
         (self.current_output_mw / self.capacity_mw).clamp(0.0, 1.0)
     }
 
@@ -59,6 +69,7 @@ impl PowerNode {
 
     /// Whether current output exceeds capacity.
     #[inline]
+    #[must_use] 
     pub fn is_overloaded(&self) -> bool {
         self.current_output_mw > self.capacity_mw
     }
@@ -102,11 +113,49 @@ mod tests {
 
     #[test]
     fn node_kinds() {
-        let kinds = [NodeKind::Generator, NodeKind::Consumer, NodeKind::Storage,
-                     NodeKind::Transformer, NodeKind::Relay];
+        let kinds = [
+            NodeKind::Generator,
+            NodeKind::Consumer,
+            NodeKind::Storage,
+            NodeKind::Transformer,
+            NodeKind::Relay,
+        ];
         for k in &kinds {
             let n = PowerNode::new(1, *k, 50.0, 60.0, 110.0);
             assert_eq!(n.kind, *k);
         }
+    }
+
+    #[test]
+    fn utilization_zero_capacity() {
+        let n = PowerNode::new(1, NodeKind::Relay, 0.0, 50.0, 110.0);
+        assert_eq!(n.utilization(), 0.0);
+    }
+
+    #[test]
+    fn utilization_negative_capacity() {
+        let n = PowerNode::new(1, NodeKind::Generator, -10.0, 50.0, 220.0);
+        assert_eq!(n.utilization(), 0.0);
+    }
+
+    #[test]
+    fn set_output_exact_capacity() {
+        let mut n = PowerNode::new(1, NodeKind::Generator, 100.0, 50.0, 220.0);
+        n.set_output(100.0);
+        assert!((n.current_output_mw - 100.0).abs() < 1e-10);
+        assert!(!n.is_overloaded());
+    }
+
+    #[test]
+    fn default_phase_angle_zero() {
+        let n = PowerNode::new(42, NodeKind::Storage, 50.0, 60.0, 110.0);
+        assert_eq!(n.phase_angle_rad, 0.0);
+    }
+
+    #[test]
+    fn initial_output_equals_capacity() {
+        let n = PowerNode::new(1, NodeKind::Generator, 250.0, 50.0, 220.0);
+        assert!((n.current_output_mw - 250.0).abs() < 1e-10);
+        assert!((n.utilization() - 1.0).abs() < 1e-10);
     }
 }

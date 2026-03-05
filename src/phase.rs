@@ -3,12 +3,8 @@
 use crate::grid::PowerGrid;
 use crate::node::NodeId;
 
-#[inline(always)]
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in data { h ^= b as u64; h = h.wrapping_mul(0x100000001b3); }
-    h
-}
+use crate::fnv1a;
+use rayon::prelude::*;
 
 /// Correction to be applied to a node's phase and frequency.
 #[derive(Debug, Clone)]
@@ -29,23 +25,29 @@ pub struct FrequencyEvent {
 }
 
 /// Compute phase corrections to align all nodes with grid average.
+#[must_use] 
 pub fn compute_phase_corrections(grid: &PowerGrid) -> Vec<PhaseCorrection> {
     let n = grid.nodes.len();
-    if n == 0 { return Vec::new(); }
+    if n == 0 {
+        return Vec::new();
+    }
 
     // Pre-compute reciprocal to eliminate per-iteration division.
     let rcp_n = 1.0 / n as f64;
     let avg_phase: f64 = grid.nodes.iter().map(|n| n.phase_angle_rad).sum::<f64>() * rcp_n;
 
-    grid.nodes.iter().map(|n| {
-        let correction_rad = avg_phase - n.phase_angle_rad;
-        PhaseCorrection {
-            node_id: n.id,
-            correction_rad,
-            correction_hz: correction_rad * 0.1, // proportional correction
-            timestamp_ns: grid.timestamp_ns,
-        }
-    }).collect()
+    grid.nodes
+        .par_iter()
+        .map(|n| {
+            let correction_rad = avg_phase - n.phase_angle_rad;
+            PhaseCorrection {
+                node_id: n.id,
+                correction_rad,
+                correction_hz: correction_rad * 0.1, // proportional correction
+                timestamp_ns: grid.timestamp_ns,
+            }
+        })
+        .collect()
 }
 
 /// Apply corrections to grid nodes.
@@ -56,12 +58,17 @@ pub fn compute_phase_corrections(grid: &PowerGrid) -> Vec<PhaseCorrection> {
 /// in the same order as `grid.nodes`, so a single zip pass suffices.
 /// Falls back to early-exit linear search only for out-of-order inputs.
 pub fn apply_phase_corrections(grid: &mut PowerGrid, corrections: &[PhaseCorrection]) {
-    if corrections.is_empty() { return; }
+    if corrections.is_empty() {
+        return;
+    }
 
     // Fast path: corrections produced by compute_phase_corrections are in
     // the same order as grid.nodes.  Zip and apply in O(n).
     let in_order = corrections.len() == grid.nodes.len()
-        && corrections.iter().zip(grid.nodes.iter()).all(|(c, n)| c.node_id == n.id);
+        && corrections
+            .iter()
+            .zip(grid.nodes.iter())
+            .all(|(c, n)| c.node_id == n.id);
 
     if in_order {
         for (node, corr) in grid.nodes.iter_mut().zip(corrections.iter()) {
@@ -75,7 +82,7 @@ pub fn apply_phase_corrections(grid: &mut PowerGrid, corrections: &[PhaseCorrect
     // correction scan nodes once but break as soon as the match is found,
     // giving O(n) average-case early-exit behaviour.
     for corr in corrections {
-        for node in grid.nodes.iter_mut() {
+        for node in &mut grid.nodes {
             if node.id == corr.node_id {
                 node.phase_angle_rad += corr.correction_rad;
                 node.frequency_hz += corr.correction_hz;
@@ -88,24 +95,31 @@ pub fn apply_phase_corrections(grid: &mut PowerGrid, corrections: &[PhaseCorrect
 /// Maximum phase deviation from grid average.
 pub fn max_phase_deviation(grid: &PowerGrid) -> f64 {
     let n = grid.nodes.len();
-    if n == 0 { return 0.0; }
+    if n == 0 {
+        return 0.0;
+    }
     // Pre-compute reciprocal to eliminate per-call division.
     let rcp_n = 1.0 / n as f64;
     let avg: f64 = grid.nodes.iter().map(|n| n.phase_angle_rad).sum::<f64>() * rcp_n;
-    grid.nodes.iter()
+    grid.nodes
+        .iter()
         .map(|n| (n.phase_angle_rad - avg).abs())
         .fold(0.0_f64, f64::max)
 }
 
 /// Check if all nodes are synchronized within tolerance.
+#[must_use] 
 pub fn is_synchronized(grid: &PowerGrid, tolerance_rad: f64) -> bool {
     max_phase_deviation(grid) <= tolerance_rad
 }
 
 /// Detect frequency anomaly if average deviation exceeds 0.1 Hz.
+#[must_use] 
 pub fn detect_frequency_event(grid: &PowerGrid, timestamp_ns: u64) -> Option<FrequencyEvent> {
     let n = grid.nodes.len();
-    if n == 0 { return None; }
+    if n == 0 {
+        return None;
+    }
     // Pre-compute reciprocal to eliminate the division inside the hot sum.
     let rcp_n = 1.0 / n as f64;
     let avg_freq: f64 = grid.nodes.iter().map(|n| n.frequency_hz).sum::<f64>() * rcp_n;
@@ -211,5 +225,59 @@ mod tests {
         apply_phase_corrections(&mut grid, &corrs);
         let dev_after = max_phase_deviation(&grid);
         assert!(dev_after < 1e-12);
+    }
+
+    #[test]
+    fn corrections_empty_grid() {
+        let grid = PowerGrid::new(1, 50.0);
+        let corrs = compute_phase_corrections(&grid);
+        assert!(corrs.is_empty());
+    }
+
+    #[test]
+    fn max_phase_deviation_empty_grid() {
+        let grid = PowerGrid::new(1, 50.0);
+        assert_eq!(max_phase_deviation(&grid), 0.0);
+    }
+
+    #[test]
+    fn is_synchronized_empty_grid() {
+        let grid = PowerGrid::new(1, 50.0);
+        assert!(is_synchronized(&grid, 0.0));
+    }
+
+    #[test]
+    fn detect_frequency_event_empty_grid() {
+        let grid = PowerGrid::new(1, 50.0);
+        assert!(detect_frequency_event(&grid, 0).is_none());
+    }
+
+    #[test]
+    fn frequency_event_hash_deterministic() {
+        let mut grid = PowerGrid::new(1, 50.0);
+        let mut n = PowerNode::new(1, NodeKind::Generator, 100.0, 50.5, 220.0);
+        n.frequency_hz = 50.5;
+        grid.add_node(n);
+        let ev1 = detect_frequency_event(&grid, 1000).unwrap();
+        let ev2 = detect_frequency_event(&grid, 1000).unwrap();
+        assert_eq!(ev1.content_hash, ev2.content_hash);
+        assert_ne!(ev1.content_hash, 0);
+    }
+
+    #[test]
+    fn apply_empty_corrections_is_noop() {
+        let mut grid = make_grid_with_phase_offsets(&[0.1, 0.2]);
+        let phase_before: Vec<f64> = grid.nodes.iter().map(|n| n.phase_angle_rad).collect();
+        apply_phase_corrections(&mut grid, &[]);
+        let phase_after: Vec<f64> = grid.nodes.iter().map(|n| n.phase_angle_rad).collect();
+        assert_eq!(phase_before, phase_after);
+    }
+
+    #[test]
+    fn single_node_correction_is_zero() {
+        let grid = make_grid_with_phase_offsets(&[0.5]);
+        let corrs = compute_phase_corrections(&grid);
+        assert_eq!(corrs.len(), 1);
+        assert!(corrs[0].correction_rad.abs() < 1e-15);
     }
 }
