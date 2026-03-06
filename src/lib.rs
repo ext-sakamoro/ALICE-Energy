@@ -41,12 +41,15 @@
 //! ```
 
 pub mod battery;
+pub mod contingency;
 pub mod dispatch;
+pub mod facts;
 pub mod grid;
 pub mod load_flow;
 pub mod node;
 pub mod phase;
 pub mod renewable;
+pub mod stability;
 
 pub use battery::{
     predict_degradation, time_to_replacement, BatteryChemistry, BatteryId, BatteryState,
