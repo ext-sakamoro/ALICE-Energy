@@ -284,7 +284,7 @@ mod tests {
     fn eigenvalue_frequency() {
         let ev = Eigenvalue {
             real: -1.0,
-            imag: 6.283,
+            imag: std::f64::consts::TAU,
         };
         assert!((ev.frequency_hz() - 1.0).abs() < 0.01);
     }
@@ -304,8 +304,8 @@ mod tests {
             real: 0.0,
             imag: 0.0,
         };
-        assert_eq!(ev.damping_ratio(), 0.0);
-        assert_eq!(ev.frequency_hz(), 0.0);
+        assert!(ev.damping_ratio().abs() < f64::EPSILON);
+        assert!(ev.frequency_hz().abs() < f64::EPSILON);
     }
 
     #[test]
