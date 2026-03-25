@@ -2,7 +2,7 @@
 name = "alice-energy"
 version = "0.1.0"
 edition = "2021"
-authors = ["Moroya Sakamoto"]
+authors = ["Moroya Sakamoto <sakamoro@alicelaw.net>"]
 description = "ALICE-Energy — Deterministic power grid simulation, phase synchronization, battery degradation prediction"
 license = "AGPL-3.0-only"
 repository = "https://github.com/ext-sakamoro/ALICE-Energy"
